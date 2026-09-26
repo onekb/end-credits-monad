@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="片尾字幕标志">
+  <rect width="512" height="512" fill="#131416"/>
+  <circle cx="256" cy="256" r="151" fill="none" stroke="#ee805c" stroke-width="19"/>
+  <path d="M256 72v368M72 256h368M126 126l260 260M386 126 126 386" stroke="#ee805c" stroke-width="19" stroke-linecap="square"/>
+  <circle cx="256" cy="256" r="38" fill="#131416" stroke="#ee805c" stroke-width="19"/>
+</svg>
