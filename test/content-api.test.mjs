@@ -6,7 +6,7 @@ import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPublicClient, createWalletClient, decodeEventLog, defineChain, http, keccak256, stringToHex } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import abi from '../src/generated/abi.json' with { type: 'json' }
 
 const rpc = 'http://127.0.0.1:18545'
@@ -51,6 +51,15 @@ test('content API accepts only a confirmed matching on-chain story', async () =>
     const contributionPost = await fetch(`${api}/api/contribution/1`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: contribution, txHash: contributionTx }) })
     assert.equal(contributionPost.status, 200)
     assert.deepEqual((await (await fetch(`${api}/api/contribution/1`)).json()).content, contribution)
+    const reason = 'Possible rights dispute'
+    const message = `End Credits hide contribution #1 on ${contract}: ${reason}`
+    const hide = async signature => fetch(`${api}/api/contribution/1/hide`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason, signature }) })
+    assert.equal((await hide(await privateKeyToAccount(generatePrivateKey()).signMessage({ message }))).status, 403)
+    assert.equal((await hide(await deployer.signMessage({ message }))).status, 200)
+    const hidden = await (await fetch(`${api}/api/contribution/1`)).json()
+    assert.equal(hidden.hidden, true)
+    assert.equal(hidden.content, undefined)
+    assert.equal((await fetch(`${api}/api/contribution/1`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: contribution, txHash: contributionTx }) })).status, 409)
   } finally {
     server?.kill()
     anvil.kill()

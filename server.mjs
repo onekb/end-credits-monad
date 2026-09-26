@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
-import { createPublicClient, decodeEventLog, http, isAddress, keccak256, stringToHex } from 'viem'
+import { createPublicClient, decodeEventLog, http, isAddress, keccak256, stringToHex, verifyMessage } from 'viem'
 import abi from './src/generated/abi.json' with { type: 'json' }
 
 try { loadEnvFile('.env') } catch { /* environment variables may be provided by the host */ }
@@ -72,14 +72,36 @@ createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost')
     if (url.pathname === '/api/health') return reply(res, 200, { ok: true, contractConfigured: isAddress(contract || '') })
+    const hide = url.pathname.match(/^\/api\/contribution\/(\d+)\/hide$/)
+    if (hide && req.method === 'POST') {
+      if (!isAddress(contract || '')) return reply(res, 503, { error: 'Contract is not configured' })
+      const id = Number(hide[1])
+      const existing = db.contributions[id]
+      if (!existing) return reply(res, 404, { error: 'Contribution content unavailable' })
+      const { reason, signature } = await bodyJson(req)
+      if (typeof reason !== 'string' || reason.length < 5 || reason.length > 300 || typeof signature !== 'string') return reply(res, 400, { error: 'A reason and signature are required' })
+      const contribution = await client.readContract({ address: contract, abi, functionName: 'getContribution', args: [BigInt(id)] })
+      const season = await client.readContract({ address: contract, abi, functionName: 'getSeason', args: [contribution.seasonId] })
+      const message = `End Credits hide contribution #${id} on ${contract}: ${reason}`
+      if (!await verifyMessage({ address: season.creator, message, signature })) return reply(res, 403, { error: 'Only the season creator can hide display material' })
+      db.contributions[id] = { ...existing, hidden: true, hideReason: reason, hiddenAt: new Date().toISOString() }
+      await save()
+      return reply(res, 200, { ok: true })
+    }
     const match = url.pathname.match(/^\/api\/(season|contribution)\/(\d+)$/)
     if (match) {
       const [, kind, idText] = match
       const id = Number(idText)
       if (!Number.isSafeInteger(id) || id < 1) return reply(res, 400, { error: 'Invalid ID' })
       const table = kind === 'season' ? 'seasons' : 'contributions'
-      if (req.method === 'GET') return reply(res, db[table][id] ? 200 : 404, db[table][id] || { error: 'Content unavailable' })
+      if (req.method === 'GET') {
+        const item = db[table][id]
+        if (!item) return reply(res, 404, { error: 'Content unavailable' })
+        if (item.hidden) return reply(res, 200, { hidden: true, hideReason: item.hideReason, hash: item.hash, txHash: item.txHash, savedAt: item.savedAt })
+        return reply(res, 200, item)
+      }
       if (req.method !== 'POST') return reply(res, 405, { error: 'Method not allowed' })
+      if (db[table][id]?.hidden) return reply(res, 409, { error: 'Display material has been hidden by the season creator' })
       const { content, txHash } = await bodyJson(req)
       const error = validate(kind, content)
       if (error) return reply(res, 400, { error })
